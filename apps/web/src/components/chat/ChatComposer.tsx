@@ -450,7 +450,7 @@ export const ChatComposer = memo(
       routeThreadRef,
       draftId,
       activeThreadId,
-      activeThreadEnvironmentId: _activeThreadEnvironmentId,
+      activeThreadEnvironmentId,
       activeThread,
       isServerThread: _isServerThread,
       isLocalDraftThread: _isLocalDraftThread,
@@ -622,6 +622,42 @@ export const ChatComposer = memo(
         ),
       [effectiveLockedProvider, modelOptionsByProvider],
     );
+
+    // ------------------------------------------------------------------
+    // Auto-correct draft model on environment change
+    // ------------------------------------------------------------------
+    const setComposerDraftModelSelection = useComposerDraftStore(
+      (store) => store.setModelSelection,
+    );
+    const envLocked = Boolean(
+      activeThread &&
+      (activeThread.messages.length > 0 ||
+        (activeThread.session !== null && activeThread.session.status !== "closed")),
+    );
+    const prevEnvironmentIdRef = useRef(activeThreadEnvironmentId);
+    useEffect(() => {
+      const currentEnvId = activeThreadEnvironmentId;
+      if (!currentEnvId || envLocked || prevEnvironmentIdRef.current === currentEnvId) {
+        prevEnvironmentIdRef.current = currentEnvId;
+        return;
+      }
+      prevEnvironmentIdRef.current = currentEnvId;
+
+      if (activeThread) {
+        setComposerDraftModelSelection(composerDraftTarget, {
+          provider: selectedProvider,
+          model: selectedModel,
+        });
+      }
+    }, [
+      activeThread,
+      activeThreadEnvironmentId,
+      composerDraftTarget,
+      envLocked,
+      selectedModel,
+      selectedProvider,
+      setComposerDraftModelSelection,
+    ]);
 
     // ------------------------------------------------------------------
     // Context window
