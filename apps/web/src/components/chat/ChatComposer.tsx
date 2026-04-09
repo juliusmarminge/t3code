@@ -39,11 +39,7 @@ import {
   expandCollapsedComposerCursor,
   replaceTextRange,
 } from "../../composer-logic";
-import {
-  deriveComposerSendState,
-  deriveLockedProvider,
-  readFileAsDataUrl,
-} from "../ChatView.logic";
+import { deriveComposerSendState, readFileAsDataUrl } from "../ChatView.logic";
 import {
   type ComposerImageAttachment,
   type DraftId,
@@ -546,18 +542,12 @@ export const ChatComposer = memo(
     const selectedProviderByThreadId = composerDraft.activeProvider ?? null;
     const threadProvider =
       activeThreadModelSelection?.provider ?? activeProjectDefaultModelSelection?.provider ?? null;
-    const computedLockedProvider = deriveLockedProvider({
-      thread: activeThread,
-      selectedProvider: selectedProviderByThreadId,
-      threadProvider,
-    });
-    const effectiveLockedProvider = lockedProvider ?? computedLockedProvider;
 
     const unlockedSelectedProvider = resolveSelectableProvider(
       providerStatuses,
       selectedProviderByThreadId ?? threadProvider ?? "codex",
     );
-    const selectedProvider: ProviderKind = effectiveLockedProvider ?? unlockedSelectedProvider;
+    const selectedProvider: ProviderKind = lockedProvider ?? unlockedSelectedProvider;
 
     const { modelOptions: composerModelOptions, selectedModel } = useEffectiveComposerModelState({
       threadRef: composerDraftTarget,
@@ -612,7 +602,7 @@ export const ChatComposer = memo(
     const searchableModelOptions = useMemo(
       () =>
         AVAILABLE_PROVIDER_OPTIONS.filter(
-          (option) => effectiveLockedProvider === null || option.value === effectiveLockedProvider,
+          (option) => lockedProvider === null || option.value === lockedProvider,
         ).flatMap((option) =>
           modelOptionsByProvider[option.value].map(({ slug, name }) => ({
             provider: option.value,
@@ -624,7 +614,7 @@ export const ChatComposer = memo(
             searchProvider: option.label.toLowerCase(),
           })),
         ),
-      [effectiveLockedProvider, modelOptionsByProvider],
+      [lockedProvider, modelOptionsByProvider],
     );
 
     // ------------------------------------------------------------------
@@ -1825,7 +1815,7 @@ export const ChatComposer = memo(
                     compact={isComposerFooterCompact}
                     provider={selectedProvider}
                     model={selectedModelForPickerWithCustomFallback}
-                    lockedProvider={effectiveLockedProvider}
+                    lockedProvider={lockedProvider}
                     providers={providerStatuses}
                     modelOptionsByProvider={modelOptionsByProvider}
                     {...(composerProviderState.modelPickerIconClassName
