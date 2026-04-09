@@ -2696,7 +2696,10 @@ export default function ChatView(props: ChatViewProps) {
         setComposerDraftPrompt(composerDraftTarget, promptForSend);
         addComposerDraftImages(composerDraftTarget, retryComposerImages);
         setComposerDraftTerminalContexts(composerDraftTarget, composerTerminalContextsSnapshot);
-        composerRef.current?.resetCursorState({ cursor: promptForSend.length });
+        composerRef.current?.resetCursorState({
+          cursor: promptForSend.length,
+          detectTrigger: true,
+        });
       }
       setThreadError(
         threadIdForSend,

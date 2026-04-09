@@ -174,7 +174,7 @@ export interface ChatComposerHandle {
     terminalContextIds: string[];
   };
   /** Reset composer cursor/trigger/highlight after external prompt mutations (e.g. onSend). */
-  resetCursorState: (options?: { cursor?: number }) => void;
+  resetCursorState: (options?: { cursor?: number; detectTrigger?: boolean }) => void;
   /** Insert a terminal context from the terminal drawer. */
   addTerminalContext: (selection: TerminalContextSelection) => void;
   /** Get the current prompt/effort/model state for use in send. */
@@ -1371,11 +1371,16 @@ export const ChatComposer = memo(
         readSnapshot: () => {
           return readComposerSnapshot();
         },
-        resetCursorState: (options?: { cursor?: number }) => {
+        resetCursorState: (options?: { cursor?: number; detectTrigger?: boolean }) => {
           const cursor = options?.cursor ?? 0;
           setComposerHighlightedItemId(null);
           setComposerCursor(cursor);
-          setComposerTrigger(null);
+          if (options?.detectTrigger) {
+            const expanded = expandCollapsedComposerCursor(promptRef.current, cursor);
+            setComposerTrigger(detectComposerTrigger(promptRef.current, expanded));
+          } else {
+            setComposerTrigger(null);
+          }
         },
         addTerminalContext: (selection: TerminalContextSelection) => {
           if (!activeThread) return;
