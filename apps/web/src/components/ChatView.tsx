@@ -2915,14 +2915,12 @@ export default function ChatView(props: ChatViewProps) {
       }
 
       const sendCtx = composerRef.current?.getSendContext();
-      const ctxSelectedProvider = sendCtx?.selectedProvider ?? selectedProvider;
-      const ctxSelectedModel = sendCtx?.selectedModel ?? "";
-      const ctxSelectedProviderModels = sendCtx?.selectedProviderModels ?? [];
-      const ctxSelectedPromptEffort = sendCtx?.selectedPromptEffort ?? null;
-      const ctxSelectedModelSelection = sendCtx?.selectedModelSelection ?? {
-        provider: ctxSelectedProvider,
-        model: ctxSelectedModel,
-      };
+      if (!sendCtx) return;
+      const ctxSelectedProvider = sendCtx.selectedProvider;
+      const ctxSelectedModel = sendCtx.selectedModel;
+      const ctxSelectedProviderModels = sendCtx.selectedProviderModels;
+      const ctxSelectedPromptEffort = sendCtx.selectedPromptEffort;
+      const ctxSelectedModelSelection = sendCtx.selectedModelSelection;
 
       const threadIdForSend = activeThread.id;
       const messageIdForSend = newMessageId();
@@ -3045,14 +3043,12 @@ export default function ChatView(props: ChatViewProps) {
     }
 
     const sendCtx = composerRef.current?.getSendContext();
-    const ctxSelectedProvider = sendCtx?.selectedProvider ?? selectedProvider;
-    const ctxSelectedModel = sendCtx?.selectedModel ?? "";
-    const ctxSelectedProviderModels = sendCtx?.selectedProviderModels ?? [];
-    const ctxSelectedPromptEffort = sendCtx?.selectedPromptEffort ?? null;
-    const ctxSelectedModelSelection = sendCtx?.selectedModelSelection ?? {
-      provider: ctxSelectedProvider,
-      model: ctxSelectedModel,
-    };
+    if (!sendCtx) return;
+    const ctxSelectedProvider = sendCtx.selectedProvider;
+    const ctxSelectedModel = sendCtx.selectedModel;
+    const ctxSelectedProviderModels = sendCtx.selectedProviderModels;
+    const ctxSelectedPromptEffort = sendCtx.selectedPromptEffort;
+    const ctxSelectedModelSelection = sendCtx.selectedModelSelection;
 
     const createdAt = new Date().toISOString();
     const nextThreadId = newThreadId();
