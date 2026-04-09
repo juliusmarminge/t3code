@@ -786,6 +786,52 @@ export const ChatComposer = memo(
     }, [composerTerminalContexts, composerTerminalContextsRef]);
 
     // ------------------------------------------------------------------
+    // Sync pending-input custom answer into prompt/cursor state
+    // ------------------------------------------------------------------
+    const lastSyncedPendingInputRef = useRef<{
+      requestId: string | null;
+      questionId: string | null;
+    } | null>(null);
+    useEffect(() => {
+      const nextCustomAnswer = activePendingProgress?.customAnswer;
+      if (typeof nextCustomAnswer !== "string") {
+        lastSyncedPendingInputRef.current = null;
+        return;
+      }
+      const nextRequestId = pendingUserInputs[0]?.requestId ?? null;
+      const nextQuestionId = activePendingProgress?.activeQuestion?.id ?? null;
+      const questionChanged =
+        lastSyncedPendingInputRef.current?.requestId !== nextRequestId ||
+        lastSyncedPendingInputRef.current?.questionId !== nextQuestionId;
+      const textChangedExternally = promptRef.current !== nextCustomAnswer;
+
+      lastSyncedPendingInputRef.current = {
+        requestId: nextRequestId,
+        questionId: nextQuestionId,
+      };
+
+      if (!questionChanged && !textChangedExternally) {
+        return;
+      }
+
+      promptRef.current = nextCustomAnswer;
+      const nextCursor = collapseExpandedComposerCursor(nextCustomAnswer, nextCustomAnswer.length);
+      setComposerCursor(nextCursor);
+      setComposerTrigger(
+        detectComposerTrigger(
+          nextCustomAnswer,
+          expandCollapsedComposerCursor(nextCustomAnswer, nextCursor),
+        ),
+      );
+      setComposerHighlightedItemId(null);
+    }, [
+      activePendingProgress?.customAnswer,
+      activePendingProgress?.activeQuestion?.id,
+      pendingUserInputs,
+      promptRef,
+    ]);
+
+    // ------------------------------------------------------------------
     // Composer menu highlight sync
     // ------------------------------------------------------------------
     useEffect(() => {
@@ -1021,7 +1067,18 @@ export const ChatComposer = memo(
         const next = replaceTextRange(promptRef.current, rangeStart, rangeEnd, replacement);
         const nextCursor = collapseExpandedComposerCursor(next.text, next.cursor);
         promptRef.current = next.text;
-        setPrompt(next.text);
+        const activePendingQuestion = activePendingProgress?.activeQuestion;
+        if (activePendingQuestion && pendingUserInputs.length > 0) {
+          onChangeActivePendingUserInputCustomAnswer(
+            activePendingQuestion.id,
+            next.text,
+            nextCursor,
+            expandCollapsedComposerCursor(next.text, nextCursor),
+            false,
+          );
+        } else {
+          setPrompt(next.text);
+        }
         setComposerCursor(nextCursor);
         setComposerTrigger(
           detectComposerTrigger(next.text, expandCollapsedComposerCursor(next.text, nextCursor)),
@@ -1031,7 +1088,13 @@ export const ChatComposer = memo(
         });
         return true;
       },
-      [promptRef, setPrompt],
+      [
+        activePendingProgress?.activeQuestion,
+        pendingUserInputs.length,
+        onChangeActivePendingUserInputCustomAnswer,
+        promptRef,
+        setPrompt,
+      ],
     );
 
     const readComposerSnapshot = useCallback((): {

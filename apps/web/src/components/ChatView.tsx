@@ -139,6 +139,7 @@ import {
   buildExpiredTerminalContextToastCopy,
   buildLocalDraftThread,
   buildTemporaryWorktreeBranchName,
+  cloneComposerImageForRetry,
   collectUserMessageBlobPreviewUrls,
   createLocalDispatchSnapshot,
   deriveComposerSendState,
@@ -2694,10 +2695,11 @@ export default function ChatView(props: ChatViewProps) {
           return next.length === existing.length ? existing : next;
         });
         promptRef.current = promptForSend;
-        composerImagesRef.current = composerImagesSnapshot;
+        const clonedImages = composerImagesSnapshot.map(cloneComposerImageForRetry);
+        composerImagesRef.current = clonedImages;
         composerTerminalContextsRef.current = composerTerminalContextsSnapshot;
         setComposerDraftPrompt(composerDraftTarget, promptForSend);
-        addComposerDraftImages(composerDraftTarget, composerImagesSnapshot);
+        addComposerDraftImages(composerDraftTarget, clonedImages);
         setComposerDraftTerminalContexts(composerDraftTarget, composerTerminalContextsSnapshot);
         composerRef.current?.resetCursorState({ cursor: promptForSend.length });
       }
