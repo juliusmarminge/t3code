@@ -170,7 +170,14 @@ export interface ChatComposerHandle {
     terminalContextIds: string[];
   };
   /** Reset composer cursor/trigger/highlight after external prompt mutations (e.g. onSend). */
-  resetCursorState: (options?: { cursor?: number }) => void;
+  resetCursorState: (options?: {
+    cursor?: number;
+    detectTrigger?: {
+      prompt: string;
+      expandedCursor: number;
+      cursorAdjacentToMention: boolean;
+    };
+  }) => void;
   /** Insert a terminal context from the terminal drawer. */
   addTerminalContext: (selection: TerminalContextSelection) => void;
   /** Get the current prompt/effort/model state for use in send. */
@@ -283,7 +290,6 @@ export interface ChatComposerProps {
 
   onProviderModelSelect: (provider: ProviderKind, model: string) => void;
   toggleInteractionMode: () => void;
-  toggleRuntimeMode: () => void;
   handleRuntimeModeChange: (mode: RuntimeMode) => void;
   handleInteractionModeChange: (mode: ProviderInteractionMode) => void;
   togglePlanSidebar: () => void;
@@ -354,7 +360,6 @@ export const ChatComposer = memo(
       onChangeActivePendingUserInputCustomAnswer,
       onProviderModelSelect,
       toggleInteractionMode,
-      toggleRuntimeMode: _toggleRuntimeMode,
       handleRuntimeModeChange,
       handleInteractionModeChange,
       togglePlanSidebar,
@@ -756,9 +761,9 @@ export const ChatComposer = memo(
         promptRef.current = removal.prompt;
         setPrompt(removal.prompt);
         removeComposerDraftTerminalContext(composerDraftTarget, contextId);
-        const nextCursor = collapseExpandedComposerCursor(removal.prompt, removal.prompt.length);
+        const nextCursor = collapseExpandedComposerCursor(removal.prompt, removal.cursor);
         setComposerCursor(nextCursor);
-        setComposerTrigger(detectComposerTrigger(removal.prompt, removal.prompt.length));
+        setComposerTrigger(detectComposerTrigger(removal.prompt, removal.cursor));
       },
       [
         composerDraftTarget,
@@ -1304,11 +1309,25 @@ export const ChatComposer = memo(
         readSnapshot: () => {
           return readComposerSnapshot();
         },
-        resetCursorState: (options?: { cursor?: number }) => {
+        resetCursorState: (options?: {
+          cursor?: number;
+          detectTrigger?: {
+            prompt: string;
+            expandedCursor: number;
+            cursorAdjacentToMention: boolean;
+          };
+        }) => {
           const cursor = options?.cursor ?? 0;
           setComposerHighlightedItemId(null);
           setComposerCursor(cursor);
-          setComposerTrigger(null);
+          if (options?.detectTrigger) {
+            const { prompt, expandedCursor, cursorAdjacentToMention } = options.detectTrigger;
+            setComposerTrigger(
+              cursorAdjacentToMention ? null : detectComposerTrigger(prompt, expandedCursor),
+            );
+          } else {
+            setComposerTrigger(null);
+          }
         },
         addTerminalContext: (selection: TerminalContextSelection) => {
           if (!activeThread) return;
