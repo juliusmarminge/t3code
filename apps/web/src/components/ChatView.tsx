@@ -37,9 +37,7 @@ import { readEnvironmentApi } from "../environmentApi";
 import { isElectron } from "../env";
 import { readLocalApi } from "../localApi";
 import { parseDiffRouteSearch, stripDiffSearchParams } from "../diffRouteSearch";
-import {
-  parseStandaloneComposerSlashCommand,
-} from "../composer-logic";
+import { parseStandaloneComposerSlashCommand } from "../composer-logic";
 import {
   deriveCompletionDividerBeforeEntryId,
   derivePendingApprovals,
@@ -93,16 +91,7 @@ import { BranchToolbar } from "./BranchToolbar";
 import { resolveShortcutCommand, shortcutLabelForCommand } from "../keybindings";
 import PlanSidebar from "./PlanSidebar";
 import ThreadTerminalDrawer from "./ThreadTerminalDrawer";
-import {
-  ChevronDownIcon,
-  ChevronLeftIcon,
-  ChevronRightIcon,
-  type LucideIcon,
-  LockIcon,
-  LockOpenIcon,
-  PenLineIcon,
-  XIcon,
-} from "lucide-react";
+import { ChevronDownIcon, ChevronLeftIcon, ChevronRightIcon, XIcon } from "lucide-react";
 import { Button } from "./ui/button";
 import { Select, SelectItem, SelectPopup, SelectTrigger, SelectValue } from "./ui/select";
 import { cn, randomUUID } from "~/lib/utils";
@@ -115,10 +104,7 @@ import {
   projectScriptIdFromCommand,
 } from "~/projectScripts";
 import { newCommandId, newDraftId, newMessageId, newThreadId } from "~/lib/utils";
-import {
-  getProviderModelCapabilities,
-  resolveSelectableProvider,
-} from "../providerModels";
+import { getProviderModelCapabilities, resolveSelectableProvider } from "../providerModels";
 import { useSettings } from "../hooks/useSettings";
 import { resolveAppModelSelection } from "../modelSelection";
 import { isTerminalFocused } from "../lib/terminalFocus";
@@ -164,6 +150,7 @@ import {
   LastInvokedScriptByProjectSchema,
   type LocalDispatchSnapshot,
   PullRequestDialogState,
+  cloneComposerImageForRetry,
   readFileAsDataUrl,
   reconcileMountedTerminalThreadIds,
   revokeBlobPreviewUrl,
@@ -337,29 +324,6 @@ interface TerminalLaunchContext {
   cwd: string;
   worktreePath: string | null;
 }
-
-const runtimeModeConfig: Record<
-  RuntimeMode,
-  { label: string; description: string; icon: LucideIcon }
-> = {
-  "approval-required": {
-    label: "Supervised",
-    description: "Ask before commands and file changes.",
-    icon: LockIcon,
-  },
-  "auto-accept-edits": {
-    label: "Auto-accept edits",
-    description: "Auto-approve edits, ask before other actions.",
-    icon: PenLineIcon,
-  },
-  "full-access": {
-    label: "Full access",
-    description: "Allow commands and edits without prompts.",
-    icon: LockOpenIcon,
-  },
-};
-
-const runtimeModeOptions = Object.keys(runtimeModeConfig) as RuntimeMode[];
 
 type PersistentTerminalLaunchContext = Pick<TerminalLaunchContext, "cwd" | "worktreePath">;
 
@@ -647,14 +611,16 @@ export default function ChatView(props: ChatViewProps) {
     (store) => store.getComposerDraft(composerDraftTarget)?.activeProvider ?? null,
   );
   const setComposerDraftPrompt = useComposerDraftStore((store) => store.setPrompt);
-  const setComposerDraftModelSelection = useComposerDraftStore(
-    (store) => store.setModelSelection,
-  );
+  const setComposerDraftModelSelection = useComposerDraftStore((store) => store.setModelSelection);
   const setComposerDraftRuntimeMode = useComposerDraftStore((store) => store.setRuntimeMode);
   const setComposerDraftInteractionMode = useComposerDraftStore(
     (store) => store.setInteractionMode,
   );
   const clearComposerDraftContent = useComposerDraftStore((store) => store.clearComposerContent);
+  const addComposerDraftImages = useComposerDraftStore((store) => store.addImages);
+  const setComposerDraftTerminalContexts = useComposerDraftStore(
+    (store) => store.setTerminalContexts,
+  );
   const setDraftThreadContext = useComposerDraftStore((store) => store.setDraftThreadContext);
   const getDraftSessionByLogicalProjectKey = useComposerDraftStore(
     (store) => store.getDraftSessionByLogicalProjectKey,
@@ -810,8 +776,7 @@ export default function ChatView(props: ChatViewProps) {
   );
   const isServerThread = routeKind === "server" && serverThread !== undefined;
   const activeThread = isServerThread ? serverThread : localDraftThread;
-  const runtimeMode =
-    composerRuntimeMode ?? activeThread?.runtimeMode ?? DEFAULT_RUNTIME_MODE;
+  const runtimeMode = composerRuntimeMode ?? activeThread?.runtimeMode ?? DEFAULT_RUNTIME_MODE;
   const interactionMode =
     composerInteractionMode ?? activeThread?.interactionMode ?? DEFAULT_INTERACTION_MODE;
   const isLocalDraftThread = !isServerThread && localDraftThread !== undefined;
@@ -1565,12 +1530,9 @@ export default function ChatView(props: ChatViewProps) {
       focusComposer();
     });
   }, [focusComposer]);
-  const addTerminalContextToDraft = useCallback(
-    (selection: TerminalContextSelection) => {
-      composerRef.current?.addTerminalContext(selection);
-    },
-    [],
-  );
+  const addTerminalContextToDraft = useCallback((selection: TerminalContextSelection) => {
+    composerRef.current?.addTerminalContext(selection);
+  }, []);
   const setTerminalOpen = useCallback(
     (open: boolean) => {
       if (!activeThreadRef) return;
@@ -2475,7 +2437,15 @@ export default function ChatView(props: ChatViewProps) {
     }
     const sendCtx = composerRef.current?.getSendContext();
     if (!sendCtx) return;
-    const { images: composerImages, terminalContexts: composerTerminalContexts, selectedProvider: ctxSelectedProvider, selectedModel: ctxSelectedModel, selectedProviderModels: ctxSelectedProviderModels, selectedPromptEffort: ctxSelectedPromptEffort, selectedModelSelection: ctxSelectedModelSelection } = sendCtx;
+    const {
+      images: composerImages,
+      terminalContexts: composerTerminalContexts,
+      selectedProvider: ctxSelectedProvider,
+      selectedModel: ctxSelectedModel,
+      selectedProviderModels: ctxSelectedProviderModels,
+      selectedPromptEffort: ctxSelectedPromptEffort,
+      selectedModelSelection: ctxSelectedModelSelection,
+    } = sendCtx;
     const promptForSend = promptRef.current;
     const {
       trimmedPrompt: trimmed,
@@ -2635,7 +2605,9 @@ export default function ChatView(props: ChatViewProps) {
           ctxSelectedModel ||
           activeProject.defaultModelSelection?.model ||
           DEFAULT_MODEL_BY_PROVIDER.codex,
-        ...(ctxSelectedModelSelection.options ? { options: ctxSelectedModelSelection.options } : {}),
+        ...(ctxSelectedModelSelection.options
+          ? { options: ctxSelectedModelSelection.options }
+          : {}),
       };
 
       // Auto-title from first message
@@ -2724,6 +2696,13 @@ export default function ChatView(props: ChatViewProps) {
         });
         promptRef.current = promptForSend;
         setComposerDraftPrompt(composerDraftTarget, promptForSend);
+        if (composerImagesSnapshot.length > 0) {
+          const clonedImages = composerImagesSnapshot.map(cloneComposerImageForRetry);
+          addComposerDraftImages(composerDraftTarget, clonedImages);
+        }
+        if (composerTerminalContextsSnapshot.length > 0) {
+          setComposerDraftTerminalContexts(composerDraftTarget, composerTerminalContextsSnapshot);
+        }
       }
       setThreadError(
         threadIdForSend,
@@ -2932,7 +2911,10 @@ export default function ChatView(props: ChatViewProps) {
       const ctxSelectedModel = sendCtx?.selectedModel ?? "";
       const ctxSelectedProviderModels = sendCtx?.selectedProviderModels ?? [];
       const ctxSelectedPromptEffort = sendCtx?.selectedPromptEffort ?? null;
-      const ctxSelectedModelSelection = sendCtx?.selectedModelSelection ?? { provider: ctxSelectedProvider, model: ctxSelectedModel };
+      const ctxSelectedModelSelection = sendCtx?.selectedModelSelection ?? {
+        provider: ctxSelectedProvider,
+        model: ctxSelectedModel,
+      };
 
       const threadIdForSend = activeThread.id;
       const messageIdForSend = newMessageId();
@@ -3059,7 +3041,10 @@ export default function ChatView(props: ChatViewProps) {
     const ctxSelectedModel = sendCtx?.selectedModel ?? "";
     const ctxSelectedProviderModels = sendCtx?.selectedProviderModels ?? [];
     const ctxSelectedPromptEffort = sendCtx?.selectedPromptEffort ?? null;
-    const ctxSelectedModelSelection = sendCtx?.selectedModelSelection ?? { provider: ctxSelectedProvider, model: ctxSelectedModel };
+    const ctxSelectedModelSelection = sendCtx?.selectedModelSelection ?? {
+      provider: ctxSelectedProvider,
+      model: ctxSelectedModel,
+    };
 
     const createdAt = new Date().toISOString();
     const nextThreadId = newThreadId();
@@ -3414,7 +3399,9 @@ export default function ChatView(props: ChatViewProps) {
               onSelectActivePendingUserInputOption={onSelectActivePendingUserInputOption}
               onAdvanceActivePendingUserInput={onAdvanceActivePendingUserInput}
               onPreviousActivePendingUserInputQuestion={onPreviousActivePendingUserInputQuestion}
-              onChangeActivePendingUserInputCustomAnswer={onChangeActivePendingUserInputCustomAnswer}
+              onChangeActivePendingUserInputCustomAnswer={
+                onChangeActivePendingUserInputCustomAnswer
+              }
               onProviderModelSelect={onProviderModelSelect}
               toggleInteractionMode={toggleInteractionMode}
               toggleRuntimeMode={toggleRuntimeMode}

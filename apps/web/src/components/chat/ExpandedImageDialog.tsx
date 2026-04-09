@@ -100,9 +100,7 @@ export const ExpandedImageDialog = memo(function ExpandedImageDialog({
         />
         <p className="mt-2 max-w-[92vw] truncate text-center text-xs text-muted-foreground/80">
           {item.name}
-          {preview.images.length > 1
-            ? ` (${preview.index + 1}/${preview.images.length})`
-            : ""}
+          {preview.images.length > 1 ? ` (${preview.index + 1}/${preview.images.length})` : ""}
         </p>
       </div>
       {preview.images.length > 1 && (

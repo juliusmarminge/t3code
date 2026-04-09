@@ -1,6 +1,5 @@
 import type {
   ApprovalRequestId,
-  ClaudeCodeEffort,
   EnvironmentId,
   ModelSelection,
   ProjectEntry,
@@ -19,7 +18,7 @@ import {
   ProviderInteractionMode as ProviderInteractionModeEnum,
 } from "@t3tools/contracts";
 import { scopeThreadRef } from "@t3tools/client-runtime";
-import { applyClaudePromptEffortPrefix, normalizeModelSlug } from "@t3tools/shared/model";
+import { normalizeModelSlug } from "@t3tools/shared/model";
 import {
   forwardRef,
   memo,
@@ -42,11 +41,7 @@ import {
   expandCollapsedComposerCursor,
   replaceTextRange,
 } from "../../composer-logic";
-import {
-  deriveComposerSendState,
-  readFileAsDataUrl,
-  cloneComposerImageForRetry,
-} from "../ChatView.logic";
+import { deriveComposerSendState, readFileAsDataUrl, threadHasStarted } from "../ChatView.logic";
 import {
   type ComposerImageAttachment,
   type DraftId,
@@ -101,7 +96,7 @@ import {
   XIcon,
 } from "lucide-react";
 import { proposedPlanTitle } from "../../proposedPlan";
-import { resolveSelectableProvider, getProviderModels, getProviderModelCapabilities } from "../../providerModels";
+import { resolveSelectableProvider, getProviderModels } from "../../providerModels";
 import { resolveAppModelSelection } from "../../modelSelection";
 import type { UnifiedSettings } from "@t3tools/contracts/settings";
 import type { SessionPhase, Thread } from "../../types";
@@ -164,20 +159,6 @@ const terminalContextIdListsEqual = (
   ids: ReadonlyArray<string>,
 ): boolean =>
   contexts.length === ids.length && contexts.every((context, index) => context.id === ids[index]);
-
-function formatOutgoingPrompt(params: {
-  provider: ProviderKind;
-  model: string | null;
-  models: ReadonlyArray<ServerProvider["models"][number]>;
-  effort: string | null;
-  text: string;
-}): string {
-  const caps = getProviderModelCapabilities(params.models, params.model, params.provider);
-  if (params.effort && caps.promptInjectedEffortLevels.includes(params.effort)) {
-    return applyClaudePromptEffortPrefix(params.text, params.effort as ClaudeCodeEffort | null);
-  }
-  return params.text;
-}
 
 // --------------------------------------------------------------------------
 // Handle exposed to ChatView
@@ -432,7 +413,7 @@ export const ChatComposer = memo(
     const selectedProviderByThreadId = composerDraft.activeProvider ?? null;
     const threadProvider =
       activeThreadModelSelection?.provider ?? activeProjectDefaultModelSelection?.provider ?? null;
-    const hasThreadStarted = activeThread ? (activeThread.messages?.length ?? 0) > 0 || activeThread.session !== null : false;
+    const hasThreadStarted = threadHasStarted(activeThread);
     const sessionProvider = activeThread?.session?.provider ?? null;
     const computedLockedProvider: ProviderKind | null = hasThreadStarted
       ? (sessionProvider ?? threadProvider ?? selectedProviderByThreadId ?? null)
@@ -1220,7 +1201,7 @@ export const ChatComposer = memo(
           return true;
         }
       }
-      if (key === "Enter") {
+      if (key === "Enter" && !event.shiftKey) {
         void onSend();
         return true;
       }
@@ -1577,8 +1558,7 @@ export const ChatComposer = memo(
                 onPaste={onComposerPaste}
                 placeholder={
                   isComposerApprovalState
-                    ? (activePendingApproval?.detail ??
-                      "Resolve this approval request to continue")
+                    ? (activePendingApproval?.detail ?? "Resolve this approval request to continue")
                     : activePendingProgress
                       ? "Type your own answer, or leave this blank to use the selected option"
                       : showPlanFollowUpPrompt && activeProposedPlan
@@ -1637,9 +1617,7 @@ export const ChatComposer = memo(
 
                   {isComposerFooterCompact ? (
                     <CompactComposerControlsMenu
-                      activePlan={Boolean(
-                        activePlan || sidebarProposedPlan || planSidebarOpen,
-                      )}
+                      activePlan={Boolean(activePlan || sidebarProposedPlan || planSidebarOpen)}
                       interactionMode={interactionMode}
                       planSidebarOpen={planSidebarOpen}
                       runtimeMode={runtimeMode}
@@ -1660,10 +1638,7 @@ export const ChatComposer = memo(
                         </>
                       ) : null}
 
-                      <Separator
-                        orientation="vertical"
-                        className="mx-0.5 hidden h-4 sm:block"
-                      />
+                      <Separator orientation="vertical" className="mx-0.5 hidden h-4 sm:block" />
 
                       <Button
                         variant="ghost"
@@ -1683,10 +1658,7 @@ export const ChatComposer = memo(
                         </span>
                       </Button>
 
-                      <Separator
-                        orientation="vertical"
-                        className="mx-0.5 hidden h-4 sm:block"
-                      />
+                      <Separator orientation="vertical" className="mx-0.5 hidden h-4 sm:block" />
 
                       <Select
                         value={runtimeMode}
@@ -1739,9 +1711,7 @@ export const ChatComposer = memo(
                             size="sm"
                             type="button"
                             onClick={togglePlanSidebar}
-                            title={
-                              planSidebarOpen ? "Hide plan sidebar" : "Show plan sidebar"
-                            }
+                            title={planSidebarOpen ? "Hide plan sidebar" : "Show plan sidebar"}
                           >
                             <ListTodoIcon />
                             <span className="sr-only sm:not-sr-only">Plan</span>
@@ -1761,13 +1731,9 @@ export const ChatComposer = memo(
                   }
                   className="flex shrink-0 flex-nowrap items-center justify-end gap-2"
                 >
-                  {activeContextWindow ? (
-                    <ContextWindowMeter usage={activeContextWindow} />
-                  ) : null}
+                  {activeContextWindow ? <ContextWindowMeter usage={activeContextWindow} /> : null}
                   {isPreparingWorktree ? (
-                    <span className="text-muted-foreground/70 text-xs">
-                      Preparing worktree...
-                    </span>
+                    <span className="text-muted-foreground/70 text-xs">Preparing worktree...</span>
                   ) : null}
                   <ComposerPrimaryActions
                     compact={isComposerPrimaryActionsCompact}
