@@ -405,6 +405,17 @@ export const ChatComposer = memo(
       : null;
     const effectiveLockedProvider = lockedProvider ?? computedLockedProvider;
 
+    const guardedOnProviderModelSelect = useCallback(
+      (provider: ProviderKind, model: string) => {
+        if (effectiveLockedProvider !== null && provider !== effectiveLockedProvider) {
+          scheduleComposerFocus();
+          return;
+        }
+        onProviderModelSelect(provider, model);
+      },
+      [effectiveLockedProvider, onProviderModelSelect, scheduleComposerFocus],
+    );
+
     const unlockedSelectedProvider = resolveSelectableProvider(
       providerStatuses,
       selectedProviderByThreadId ?? threadProvider ?? "codex",
@@ -1180,7 +1191,7 @@ export const ChatComposer = memo(
           }
           return;
         }
-        onProviderModelSelect(item.provider, item.model);
+        guardedOnProviderModelSelect(item.provider, item.model);
         const applied = applyPromptReplacement(trigger.rangeStart, trigger.rangeEnd, "", {
           expectedText: snapshot.value.slice(trigger.rangeStart, trigger.rangeEnd),
         });
@@ -1191,7 +1202,7 @@ export const ChatComposer = memo(
       [
         applyPromptReplacement,
         handleInteractionModeChange,
-        onProviderModelSelect,
+        guardedOnProviderModelSelect,
         resolveActiveComposerTrigger,
       ],
     );
@@ -1240,9 +1251,12 @@ export const ChatComposer = memo(
           nudgeComposerMenuHighlight("ArrowUp");
           return true;
         }
-        if ((key === "Enter" || key === "Tab") && activeComposerMenuItemRef.current) {
-          onSelectComposerItem(activeComposerMenuItemRef.current);
-          return true;
+        if (key === "Enter" || key === "Tab") {
+          const selectedItem = activeComposerMenuItemRef.current ?? currentItems[0];
+          if (selectedItem) {
+            onSelectComposerItem(selectedItem);
+            return true;
+          }
         }
       }
       if (key === "Enter" && !event.shiftKey) {
@@ -1657,7 +1671,7 @@ export const ChatComposer = memo(
                             composerProviderState.modelPickerIconClassName,
                         }
                       : {})}
-                    onProviderModelChange={onProviderModelSelect}
+                    onProviderModelChange={guardedOnProviderModelSelect}
                   />
 
                   {isComposerFooterCompact ? (
