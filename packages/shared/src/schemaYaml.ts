@@ -1,5 +1,4 @@
 import * as Effect from "effect/Effect";
-import * as Option from "effect/Option";
 import * as Schema from "effect/Schema";
 import * as SchemaGetter from "effect/SchemaGetter";
 import * as SchemaIssue from "effect/SchemaIssue";
@@ -33,72 +32,22 @@ function formatYamlParseError(error: unknown): string {
   return `Invalid YAML (code=${error.code}${location}).`;
 }
 
-/**
- * Parses a YAML string into a value.
- *
- * **When to use**
- *
- * Use when you need a schema getter to parse a present encoded YAML string
- * during decoding.
- *
- * **Details**
- *
- * Parse failures become `SchemaIssue.InvalidValue` values.
- *
- * **Example** (Parse YAML)
- *
- * ```ts
- * import { parseYaml } from "@t3tools/shared/schemaYaml"
- *
- * const parse = parseYaml<string>()
- * // Getter<unknown, string>
- * ```
- *
- * @see {@link stringifyYaml} for the inverse operation
- */
-export function parseYaml<E extends string>(
-  options?: YamlParseOptions,
-): SchemaGetter.Getter<unknown, E> {
+/** Parses YAML during decoding, reporting parse failures as InvalidValue issues. */
+function parseYaml<E extends string>(options?: YamlParseOptions): SchemaGetter.Getter<unknown, E> {
   return SchemaGetter.transformOrFail((input: E) =>
     Effect.try({
       try: () => parseYamlString(input, options) as unknown,
-      catch: (error) =>
-        new SchemaIssue.InvalidValue(Option.none(), { message: formatYamlParseError(error) }),
+      catch: (error) => new SchemaIssue.InvalidValue({ message: formatYamlParseError(error) }),
     }),
   );
 }
 
-/**
- * Stringifies a present value as YAML.
- *
- * **When to use**
- *
- * Use when you need a schema getter to serialize a present decoded value to
- * YAML text during encoding.
- *
- * **Details**
- *
- * Stringify failures become `SchemaIssue.InvalidValue` values.
- *
- * **Example** (Stringify YAML)
- *
- * ```ts
- * import { stringifyYaml } from "@t3tools/shared/schemaYaml"
- *
- * const stringify = stringifyYaml()
- * // Getter<string, unknown>
- * ```
- *
- * @see {@link parseYaml} for the inverse operation
- */
-export function stringifyYaml(
-  options?: YamlStringifyOptions,
-): SchemaGetter.Getter<string, unknown> {
+/** Serializes YAML during encoding, reporting stringify failures as InvalidValue issues. */
+function stringifyYaml(options?: YamlStringifyOptions): SchemaGetter.Getter<string, unknown> {
   return SchemaGetter.transformOrFail((input: unknown) =>
     Effect.try({
       try: () => stringifyYamlValue(input, options),
-      catch: () =>
-        new SchemaIssue.InvalidValue(Option.none(), { message: "Failed to stringify YAML." }),
+      catch: () => new SchemaIssue.InvalidValue({ message: "Failed to stringify YAML." }),
     }),
   );
 }

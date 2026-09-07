@@ -1,14 +1,21 @@
 import {
-  deriveLogicalProjectKey,
+  buildProjectGroups,
+  derivePhysicalProjectKey,
   deriveProjectGroupLabel,
 } from "@t3tools/client-runtime/state/project-grouping";
 import type {
   EnvironmentProject,
   EnvironmentThreadShell,
 } from "@t3tools/client-runtime/state/shell";
-import { getThreadSortTimestamp, sortThreads } from "@t3tools/client-runtime/state/thread-sort";
+import {
+  getThreadSortTimestamp,
+  sortThreads,
+  toSortableTimestamp,
+} from "@t3tools/client-runtime/state/thread-sort";
+import { threadSearchMatchKey } from "@t3tools/client-runtime/state/thread-search";
 import type {
   EnvironmentId,
+  ScopedProjectRef,
   SidebarProjectGroupingMode,
   SidebarProjectSortOrder,
   SidebarThreadSortOrder,
@@ -17,10 +24,114 @@ import * as Arr from "effect/Array";
 import * as Option from "effect/Option";
 import * as Order from "effect/Order";
 
-import { scopedProjectKey } from "../../lib/scopedEntities";
+import { scopedProjectKey, scopedThreadKey } from "../../lib/scopedEntities";
 import type { PendingNewTask } from "../../state/use-pending-new-tasks";
 
 export type HomeProjectSortOrder = Exclude<SidebarProjectSortOrder, "manual">;
+
+export interface HomeProjectScope {
+  readonly key: string;
+  readonly title: string;
+  readonly representative: EnvironmentProject;
+  readonly projects: ReadonlyArray<EnvironmentProject>;
+  readonly projectRefs: ReadonlyArray<ScopedProjectRef>;
+}
+
+function getProjectSortTimestamp(
+  project: EnvironmentProject,
+  sortOrder: HomeProjectSortOrder,
+): number {
+  return sortOrder === "created_at"
+    ? (toSortableTimestamp(project.createdAt) ?? Number.NEGATIVE_INFINITY)
+    : (toSortableTimestamp(project.updatedAt) ??
+        toSortableTimestamp(project.createdAt) ??
+        Number.NEGATIVE_INFINITY);
+}
+
+export function buildHomeProjectScopes(input: {
+  readonly projects: ReadonlyArray<EnvironmentProject>;
+  readonly environmentId: EnvironmentId | null;
+  readonly projectGroupingMode: SidebarProjectGroupingMode;
+}): ReadonlyArray<HomeProjectScope> {
+  const projects = input.projects.filter(
+    (project) => input.environmentId === null || project.environmentId === input.environmentId,
+  );
+  return buildProjectGroups({
+    projects,
+    settings: {
+      sidebarProjectGroupingMode: input.projectGroupingMode,
+      sidebarProjectGroupingOverrides: {},
+    },
+  }).map((group) => {
+    return {
+      key: group.key,
+      title: group.label,
+      representative: group.representative,
+      projects: group.members.map((member) => member.project),
+      projectRefs: group.memberProjectRefs,
+    };
+  });
+}
+
+export function sortHomeProjectScopes(input: {
+  readonly scopes: ReadonlyArray<HomeProjectScope>;
+  readonly threads: ReadonlyArray<EnvironmentThreadShell>;
+  readonly pendingTasks: ReadonlyArray<PendingNewTask>;
+  readonly projectSortOrder: HomeProjectSortOrder;
+}): ReadonlyArray<HomeProjectScope> {
+  const scopeKeyByProjectRef = new Map(
+    input.scopes.flatMap((scope) =>
+      scope.projectRefs.map(
+        (projectRef) =>
+          [scopedProjectKey(projectRef.environmentId, projectRef.projectId), scope.key] as const,
+      ),
+    ),
+  );
+  const latestActivityByScope = new Map<string, number>();
+  const recordActivity = (scopeKey: string | undefined, timestamp: number) => {
+    if (!scopeKey || !Number.isFinite(timestamp)) return;
+    latestActivityByScope.set(
+      scopeKey,
+      Math.max(latestActivityByScope.get(scopeKey) ?? Number.NEGATIVE_INFINITY, timestamp),
+    );
+  };
+
+  for (const thread of input.threads) {
+    if (thread.archivedAt !== null) continue;
+    recordActivity(
+      scopeKeyByProjectRef.get(scopedProjectKey(thread.environmentId, thread.projectId)),
+      getThreadSortTimestamp(thread, input.projectSortOrder),
+    );
+  }
+  for (const pendingTask of input.pendingTasks) {
+    recordActivity(
+      scopeKeyByProjectRef.get(scopedProjectKey(pendingTask.environmentId, pendingTask.projectId)),
+      Date.parse(pendingTask.createdAt),
+    );
+  }
+
+  return Arr.sort(
+    input.scopes,
+    Order.mapInput(
+      Order.Struct({
+        timestamp: Order.flip(Order.Number),
+        title: Order.String,
+        key: Order.String,
+      }),
+      (scope: HomeProjectScope) => ({
+        timestamp:
+          latestActivityByScope.get(scope.key) ??
+          Math.max(
+            ...scope.projects.map((project) =>
+              getProjectSortTimestamp(project, input.projectSortOrder),
+            ),
+          ),
+        title: scope.title,
+        key: scope.key,
+      }),
+    ),
+  );
+}
 
 /**
  * Default home view only surfaces threads active within this window, to keep the
@@ -64,7 +175,7 @@ function groupSortTimestamp(group: HomeThreadGroup, sortOrder: HomeProjectSortOr
     Number.NEGATIVE_INFINITY,
   );
   return group.pendingTasks.reduce((latest, pendingTask) => {
-    const timestamp = Date.parse(pendingTask.message.createdAt);
+    const timestamp = Date.parse(pendingTask.createdAt);
     return Number.isNaN(timestamp) ? latest : Math.max(latest, timestamp);
   }, latestThread);
 }
@@ -79,10 +190,15 @@ function selectRecentThreads(
   sortedThreads: ReadonlyArray<EnvironmentThreadShell>,
   threadSortOrder: SidebarThreadSortOrder,
   now: number,
+  queuedThreadKeys: ReadonlySet<string> | undefined,
 ): ReadonlyArray<EnvironmentThreadShell> {
   const cutoff = now - RECENT_THREAD_WINDOW_MS;
+  // A thread with a message waiting in the outbox has work the user is
+  // waiting on, however old its last activity; it never trims away.
   const recent = sortedThreads.filter(
-    (thread) => getThreadSortTimestamp(thread, threadSortOrder) >= cutoff,
+    (thread) =>
+      getThreadSortTimestamp(thread, threadSortOrder) >= cutoff ||
+      queuedThreadKeys?.has(scopedThreadKey(thread.environmentId, thread.id)) === true,
   );
   return recent.length > 0 ? recent : sortedThreads.slice(0, RECENT_THREAD_FALLBACK_COUNT);
 }
@@ -91,8 +207,11 @@ export function buildHomeThreadGroups(input: {
   readonly projects: ReadonlyArray<EnvironmentProject>;
   readonly threads: ReadonlyArray<EnvironmentThreadShell>;
   readonly pendingTasks?: ReadonlyArray<PendingNewTask>;
+  /** Thread keys with a message waiting in the outbox; kept in the default view. */
+  readonly queuedThreadKeys?: ReadonlySet<string>;
   readonly environmentId: EnvironmentId | null;
   readonly searchQuery: string;
+  readonly matchedThreadKeys?: ReadonlySet<string>;
   readonly projectSortOrder: HomeProjectSortOrder;
   readonly threadSortOrder: SidebarThreadSortOrder;
   readonly projectGroupingMode: SidebarProjectGroupingMode;
@@ -101,36 +220,31 @@ export function buildHomeThreadGroups(input: {
 }): ReadonlyArray<HomeThreadGroup> {
   const now = input.now ?? Date.now();
   const groups = new Map<string, MutableHomeThreadGroup>();
+  const groupTitleByKey = new Map<string, string>();
   const groupKeyByProjectKey = new Map<string, string>();
 
-  for (const project of input.projects) {
-    if (input.environmentId !== null && project.environmentId !== input.environmentId) {
-      continue;
-    }
-
-    const groupKey = deriveLogicalProjectKey(project, {
-      groupingMode: input.projectGroupingMode,
+  for (const scope of buildHomeProjectScopes(input)) {
+    groupTitleByKey.set(scope.key, scope.title);
+    groups.set(scope.key, {
+      key: scope.key,
+      projects: [...scope.projects],
+      pendingTasks: [],
+      threads: [],
     });
-    const physicalKey = scopedProjectKey(project.environmentId, project.id);
-    groupKeyByProjectKey.set(physicalKey, groupKey);
-
-    const existing = groups.get(groupKey);
-    if (existing) {
-      existing.projects.push(project);
-    } else {
-      groups.set(groupKey, { key: groupKey, projects: [project], pendingTasks: [], threads: [] });
+    for (const projectRef of scope.projectRefs) {
+      groupKeyByProjectKey.set(
+        scopedProjectKey(projectRef.environmentId, projectRef.projectId),
+        scope.key,
+      );
     }
   }
 
   for (const pendingTask of input.pendingTasks ?? []) {
-    if (input.environmentId !== null && pendingTask.message.environmentId !== input.environmentId) {
+    if (input.environmentId !== null && pendingTask.environmentId !== input.environmentId) {
       continue;
     }
 
-    const physicalKey = scopedProjectKey(
-      pendingTask.message.environmentId,
-      pendingTask.creation.projectId,
-    );
+    const physicalKey = scopedProjectKey(pendingTask.environmentId, pendingTask.projectId);
     let groupKey = groupKeyByProjectKey.get(physicalKey);
     if (!groupKey) {
       // The project shell is not loaded (environment offline / project gone).
@@ -142,16 +256,15 @@ export function buildHomeThreadGroups(input: {
         key: groupKey,
         projects: [
           {
-            environmentId: pendingTask.message.environmentId,
-            id: pendingTask.creation.projectId,
-            title: pendingTask.creation.projectTitle ?? "Unknown project",
-            workspaceRoot:
-              pendingTask.creation.projectCwd ?? String(pendingTask.creation.projectId),
+            environmentId: pendingTask.environmentId,
+            id: pendingTask.projectId,
+            title: pendingTask.projectTitle ?? "Unknown project",
+            workspaceRoot: pendingTask.projectCwd ?? String(pendingTask.projectId),
             repositoryIdentity: null,
             defaultModelSelection: null,
             scripts: [],
-            createdAt: pendingTask.message.createdAt,
-            updatedAt: pendingTask.message.createdAt,
+            createdAt: pendingTask.createdAt,
+            updatedAt: pendingTask.createdAt,
           },
         ],
         pendingTasks: [],
@@ -187,16 +300,24 @@ export function buildHomeThreadGroups(input: {
     }
 
     const title =
-      group.projects.length > 1
-        ? deriveProjectGroupLabel({ representative, members: group.projects })
-        : representative.title;
+      groupTitleByKey.get(group.key) ??
+      deriveProjectGroupLabel({ representative, members: group.projects });
     const groupMatches =
       query.length === 0 ||
       title.toLocaleLowerCase().includes(query) ||
       group.projects.some((project) => project.title.toLocaleLowerCase().includes(query));
     const matchingThreads = groupMatches
       ? group.threads
-      : group.threads.filter((thread) => thread.title.toLocaleLowerCase().includes(query));
+      : group.threads.filter(
+          (thread) =>
+            thread.title.toLocaleLowerCase().includes(query) ||
+            input.matchedThreadKeys?.has(
+              threadSearchMatchKey({
+                environmentId: thread.environmentId,
+                threadId: thread.id,
+              }),
+            ) === true,
+        );
     const matchingPendingTasks = groupMatches
       ? group.pendingTasks
       : group.pendingTasks.filter((pendingTask) =>
@@ -212,22 +333,24 @@ export function buildHomeThreadGroups(input: {
     // only trims the default (no-query) view.
     const recentThreads =
       query.length === 0
-        ? selectRecentThreads(sortedThreads, input.threadSortOrder, now)
+        ? selectRecentThreads(sortedThreads, input.threadSortOrder, now, input.queuedThreadKeys)
         : sortedThreads;
 
-    // Sorted newest-first, so the first thread whose project is a group member
-    // marks the machine the user last worked on.
-    const lastActiveProject = Arr.findFirst(sortedThreads, (thread) =>
-      group.projects.some(
-        (project) =>
-          project.environmentId === thread.environmentId && project.id === thread.projectId,
-      ),
-    ).pipe(
+    // A stale project id still resolves to the canonical member with the same
+    // environment/path, so quick creation follows the machine with the newest activity.
+    const lastActiveProject = Arr.head(sortedThreads).pipe(
       Option.flatMap((thread) =>
+        Arr.findFirst(
+          input.projects,
+          (project) =>
+            project.environmentId === thread.environmentId && project.id === thread.projectId,
+        ),
+      ),
+      Option.flatMap((threadProject) =>
         Arr.findFirst(
           group.projects,
           (project) =>
-            project.environmentId === thread.environmentId && project.id === thread.projectId,
+            derivePhysicalProjectKey(project) === derivePhysicalProjectKey(threadProject),
         ),
       ),
       Option.getOrNull,

@@ -43,19 +43,11 @@ export interface ProjectThreadAwarenessInput {
   >;
 }
 
-export function buildAgentAwarenessDeepLink(input: {
+function buildAgentAwarenessDeepLink(input: {
   readonly environmentId: EnvironmentId;
   readonly threadId: ThreadId;
 }): string {
   return `/threads/${encodeURIComponent(input.environmentId)}/${encodeURIComponent(input.threadId)}`;
-}
-
-export function isTerminalAgentAwarenessPhase(phase: AgentAwarenessPhase): boolean {
-  return phase === "completed" || phase === "failed";
-}
-
-export function isInterruptiveAgentAwarenessPhase(phase: AgentAwarenessPhase): boolean {
-  return phase === "waiting_for_approval" || phase === "waiting_for_input" || phase === "failed";
 }
 
 export function projectThreadAwareness(

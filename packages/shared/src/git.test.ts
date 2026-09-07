@@ -7,6 +7,7 @@ import {
   isTemporaryWorktreeBranch,
   normalizeGitRemoteUrl,
   parseGitHubRepositoryNameWithOwnerFromRemoteUrl,
+  parseOriginUrlFromGitConfig,
   WORKTREE_BRANCH_PREFIX,
 } from "./git.ts";
 
@@ -40,6 +41,81 @@ describe("normalizeGitRemoteUrl", () => {
       "gitlab.company.com/team/project",
     );
   });
+
+  it("normalizes SCP-like remotes with non-git SSH users", () => {
+    expect(normalizeGitRemoteUrl("gitlab@gitlab.example.com:group/project.git")).toBe(
+      "gitlab.example.com/group/project",
+    );
+    expect(normalizeGitRemoteUrl("deploy@bitbucket.org:workspace/repo.git")).toBe(
+      "bitbucket.org/workspace/repo",
+    );
+  });
+});
+
+describe("parseOriginUrlFromGitConfig", () => {
+  it("reads the origin url and ignores other remotes", () => {
+    const config = [
+      "[core]",
+      "\trepositoryformatversion = 0",
+      '[remote "upstream"]',
+      "\turl = https://github.com/other/repo.git",
+      '[remote "origin"]',
+      "\turl = git@github.com:pingdotgg/t3code.git",
+      "\tfetch = +refs/heads/*:refs/remotes/origin/*",
+      '[branch "main"]',
+      "\tremote = origin",
+    ].join("\n");
+    expect(parseOriginUrlFromGitConfig(config)).toBe("git@github.com:pingdotgg/t3code.git");
+  });
+
+  it("strips inline comments and quotes from the url value", () => {
+    expect(
+      parseOriginUrlFromGitConfig(
+        '[remote "origin"]\n\turl = https://github.com/acme/repo.git # mirror\n',
+      ),
+    ).toBe("https://github.com/acme/repo.git");
+    expect(
+      parseOriginUrlFromGitConfig('[remote "origin"]\n\turl = "git@github.com:acme/repo.git"\n'),
+    ).toBe("git@github.com:acme/repo.git");
+  });
+
+  it("accepts legacy dotted headers, header comments, and line continuations", () => {
+    expect(parseOriginUrlFromGitConfig("[remote.origin]\n\turl = git@github.com:a/b.git\n")).toBe(
+      "git@github.com:a/b.git",
+    );
+    // Git folds the dotted form to lowercase but keeps quoted names as written.
+    expect(parseOriginUrlFromGitConfig("[remote.Origin]\n\turl = git@github.com:a/b.git\n")).toBe(
+      "git@github.com:a/b.git",
+    );
+    expect(
+      parseOriginUrlFromGitConfig(
+        '[remote "Origin"]\n\turl = git@github.com:x/y.git\n[remote "origin"]\n\turl = git@github.com:a/b.git\n',
+      ),
+    ).toBe("git@github.com:a/b.git");
+    expect(
+      parseOriginUrlFromGitConfig('[remote "origin"] # primary\n\turl = git@github.com:a/b.git\n'),
+    ).toBe("git@github.com:a/b.git");
+    expect(
+      parseOriginUrlFromGitConfig(
+        '[remote "origin"]\n\turl = https://github.com/acme/\\\n\t\trepo.git\n',
+      ),
+    ).toBe("https://github.com/acme/repo.git");
+  });
+
+  it("falls back to the first remote when there is no origin", () => {
+    const config = [
+      '[remote "upstream"]',
+      "\turl = https://github.com/acme/repo.git",
+      '[remote "fork"]',
+      "\turl = https://github.com/me/repo.git",
+    ].join("\n");
+    expect(parseOriginUrlFromGitConfig(config)).toBe("https://github.com/acme/repo.git");
+  });
+
+  it("returns null when there is no remote section", () => {
+    expect(parseOriginUrlFromGitConfig("[core]\n\tbare = false\n")).toBeNull();
+    expect(parseOriginUrlFromGitConfig("")).toBeNull();
+  });
 });
 
 describe("parseGitHubRepositoryNameWithOwnerFromRemoteUrl", () => {
@@ -49,6 +125,9 @@ describe("parseGitHubRepositoryNameWithOwnerFromRemoteUrl", () => {
     ).toBe("T3Tools/T3Code");
     expect(
       parseGitHubRepositoryNameWithOwnerFromRemoteUrl("https://github.com/T3Tools/T3Code.git"),
+    ).toBe("T3Tools/T3Code");
+    expect(
+      parseGitHubRepositoryNameWithOwnerFromRemoteUrl("ssh://github.com/T3Tools/T3Code.git"),
     ).toBe("T3Tools/T3Code");
   });
 });
@@ -69,6 +148,29 @@ describe("isTemporaryWorktreeBranch", () => {
     expect(isTemporaryWorktreeBranch(`${WORKTREE_BRANCH_PREFIX}/deadbeef`)).toBe(true);
     expect(isTemporaryWorktreeBranch(` ${WORKTREE_BRANCH_PREFIX}/deadbeef `)).toBe(true);
     expect(isTemporaryWorktreeBranch(`${WORKTREE_BRANCH_PREFIX}/DEADBEEF`)).toBe(true);
+  });
+
+  it("normalizes a UUID-shaped random callback to the canonical 8-hex form", () => {
+    expect(buildTemporaryWorktreeBranchName(() => "f4ae4e0e-f971-4d48-b4f2-9cf0aa54ab12")).toBe(
+      `${WORKTREE_BRANCH_PREFIX}/f4ae4e0e`,
+    );
+  });
+
+  it("matches legacy UUID-shaped temporary worktree refs from older mobile builds", () => {
+    expect(
+      isTemporaryWorktreeBranch(`${WORKTREE_BRANCH_PREFIX}/f4ae4e0e-f971-4d48-b4f2-9cf0aa54ab12`),
+    ).toBe(true);
+  });
+
+  it("rejects UUID-shaped refs that are not RFC 4122 v4", () => {
+    // version nibble is not 4
+    expect(
+      isTemporaryWorktreeBranch(`${WORKTREE_BRANCH_PREFIX}/f4ae4e0e-f971-1d48-b4f2-9cf0aa54ab12`),
+    ).toBe(false);
+    // variant nibble is not [89ab]
+    expect(
+      isTemporaryWorktreeBranch(`${WORKTREE_BRANCH_PREFIX}/f4ae4e0e-f971-4d48-c4f2-9cf0aa54ab12`),
+    ).toBe(false);
   });
 
   it("rejects non-temporary refName names", () => {

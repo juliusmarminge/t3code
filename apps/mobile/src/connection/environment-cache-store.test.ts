@@ -32,6 +32,12 @@ function makeDatabase() {
   const database = MobileDatabase.of({
     loadCache: (environmentId, kind, cacheKey) =>
       Effect.succeed(Option.fromUndefinedOr(values.get(cacheId(environmentId, kind, cacheKey)))),
+    listCache: (kind) =>
+      Effect.sync(() =>
+        [...values.entries()]
+          .filter(([key]) => key.split(":")[1] === kind)
+          .map(([, payload]) => payload),
+      ),
     saveCache: (environmentId, kind, cacheKey, _schemaVersion, payload) =>
       Effect.sync(() => {
         values.set(cacheId(environmentId, kind, cacheKey), payload);
@@ -41,6 +47,12 @@ function makeDatabase() {
         const id = cacheId(environmentId, kind, cacheKey);
         removed.push(id);
         values.delete(id);
+      }),
+    clearCacheKind: (environmentId, kind) =>
+      Effect.sync(() => {
+        for (const key of values.keys()) {
+          if (key.startsWith(`${environmentId}:${kind}:`)) values.delete(key);
+        }
       }),
     clearEnvironmentCache: (environmentId) =>
       Effect.sync(() => {
@@ -77,6 +89,36 @@ describe("mobile SQLite environment cache store", () => {
 
       expect(yield* store.loadVcsRefs(ENVIRONMENT_ID, "/repo")).toEqual(Option.none());
       expect(memory.removed).toEqual([id]);
+    }),
+  );
+
+  it.effect("removes one persisted VCS ref snapshot", () =>
+    Effect.gen(function* () {
+      const memory = makeDatabase();
+      const store = yield* make().pipe(Effect.provideService(MobileDatabase, memory.database));
+      yield* store.saveVcsRefs(ENVIRONMENT_ID, "/repo", REFS);
+
+      yield* store.removeVcsRefs(ENVIRONMENT_ID, "/repo");
+
+      expect(yield* store.loadVcsRefs(ENVIRONMENT_ID, "/repo")).toEqual(Option.none());
+      expect(memory.removed).toContain(cacheId(ENVIRONMENT_ID, "vcs-refs", "/repo"));
+    }),
+  );
+
+  it.effect("clears every persisted VCS ref snapshot in one environment", () =>
+    Effect.gen(function* () {
+      const memory = makeDatabase();
+      const store = yield* make().pipe(Effect.provideService(MobileDatabase, memory.database));
+      const otherEnvironmentId = EnvironmentId.make("environment-2");
+      yield* store.saveVcsRefs(ENVIRONMENT_ID, "/repo", REFS);
+      yield* store.saveVcsRefs(ENVIRONMENT_ID, "/repo-worktree", REFS);
+      yield* store.saveVcsRefs(otherEnvironmentId, "/repo", REFS);
+
+      yield* store.clearVcsRefs(ENVIRONMENT_ID);
+
+      expect(yield* store.loadVcsRefs(ENVIRONMENT_ID, "/repo")).toEqual(Option.none());
+      expect(yield* store.loadVcsRefs(ENVIRONMENT_ID, "/repo-worktree")).toEqual(Option.none());
+      expect(yield* store.loadVcsRefs(otherEnvironmentId, "/repo")).toEqual(Option.some(REFS));
     }),
   );
 

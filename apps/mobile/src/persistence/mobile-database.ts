@@ -16,7 +16,13 @@ const LEGACY_CACHE_DIRECTORIES = [
   "connection-vcs-refs",
 ] as const;
 
-export const ClientCacheKind = Schema.Literals(["shell", "thread", "server-config", "vcs-refs"]);
+export const ClientCacheKind = Schema.Literals([
+  "shell",
+  "thread",
+  "server-config",
+  "vcs-refs",
+  "project-favicon",
+]);
 export type ClientCacheKind = typeof ClientCacheKind.Type;
 
 export interface ClientCacheSummaryRow {
@@ -44,8 +50,10 @@ const MobileDatabaseOperation = Schema.Literals([
   "open",
   "migrate",
   "load-cache",
+  "list-cache",
   "save-cache",
   "remove-cache",
+  "clear-cache-kind",
   "clear-environment-cache",
   "clear-all-caches",
   "inspect-caches",
@@ -191,6 +199,9 @@ export class MobileDatabase extends Context.Service<
       kind: ClientCacheKind,
       cacheKey: string,
     ) => Effect.Effect<Option.Option<string>, MobileDatabaseError>;
+    readonly listCache: (
+      kind: ClientCacheKind,
+    ) => Effect.Effect<ReadonlyArray<string>, MobileDatabaseError>;
     readonly saveCache: (
       environmentId: EnvironmentId,
       kind: ClientCacheKind,
@@ -202,6 +213,10 @@ export class MobileDatabase extends Context.Service<
       environmentId: EnvironmentId,
       kind: ClientCacheKind,
       cacheKey: string,
+    ) => Effect.Effect<void, MobileDatabaseError>;
+    readonly clearCacheKind: (
+      environmentId: EnvironmentId,
+      kind: ClientCacheKind,
     ) => Effect.Effect<void, MobileDatabaseError>;
     readonly clearEnvironmentCache: (
       environmentId: EnvironmentId,
@@ -287,6 +302,16 @@ const makeAvailable = Effect.gen(function* () {
         catch: databaseError("load-cache"),
       }).pipe(Effect.map((row) => Option.fromNullishOr(row?.payload))),
     ),
+    listCache: Effect.fn("MobileDatabase.listCache")((kind) =>
+      Effect.tryPromise({
+        try: () =>
+          database.getAllAsync<{ readonly payload: string }>(
+            "SELECT payload FROM client_cache WHERE kind = ? ORDER BY updated_at",
+            kind,
+          ),
+        catch: databaseError("list-cache"),
+      }).pipe(Effect.map((rows) => rows.map((row) => row.payload))),
+    ),
     saveCache: Effect.fn("MobileDatabase.saveCache")(
       (environmentId, kind, cacheKey, schemaVersion, payload) =>
         Effect.tryPromise({
@@ -322,6 +347,17 @@ const makeAvailable = Effect.gen(function* () {
         catch: databaseError("remove-cache"),
       }).pipe(Effect.asVoid),
     ),
+    clearCacheKind: Effect.fn("MobileDatabase.clearCacheKind")((environmentId, kind) =>
+      Effect.tryPromise({
+        try: () =>
+          database.runAsync(
+            "DELETE FROM client_cache WHERE environment_id = ? AND kind = ?",
+            environmentId,
+            kind,
+          ),
+        catch: databaseError("clear-cache-kind"),
+      }).pipe(Effect.asVoid),
+    ),
     clearEnvironmentCache: Effect.fn("MobileDatabase.clearEnvironmentCache")((environmentId) =>
       Effect.tryPromise({
         try: () =>
@@ -349,14 +385,13 @@ const makeAvailable = Effect.gen(function* () {
     }).pipe(
       Effect.flatMap(Schema.decodeUnknownEffect(ClientCacheSummaryRows)),
       Effect.mapError(databaseError("inspect-caches")),
-      Effect.map(
-        (rows): ReadonlyArray<ClientCacheSummaryRow> =>
-          rows.map((row) => ({
-            environmentId: row.environmentId as EnvironmentId,
-            kind: row.kind,
-            recordCount: row.recordCount,
-            payloadBytes: row.payloadBytes,
-          })),
+      Effect.map((rows): ReadonlyArray<ClientCacheSummaryRow> =>
+        rows.map((row) => ({
+          environmentId: row.environmentId as EnvironmentId,
+          kind: row.kind,
+          recordCount: row.recordCount,
+          payloadBytes: row.payloadBytes,
+        })),
       ),
     ),
     loadPreferencesJson: Effect.tryPromise({
@@ -390,8 +425,10 @@ function makeUnavailable(error: MobileDatabaseError): MobileDatabase["Service"] 
   const fail = Effect.fail(error);
   return MobileDatabase.of({
     loadCache: () => fail,
+    listCache: () => fail,
     saveCache: () => fail,
     removeCache: () => fail,
+    clearCacheKind: () => fail,
     clearEnvironmentCache: () => fail,
     clearAllCaches: fail,
     inspectCaches: fail,

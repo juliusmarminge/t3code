@@ -1,3 +1,5 @@
+import { MAX_SCRIPT_ID_LENGTH } from "@t3tools/contracts";
+import { shortcutLabelForCommand } from "./keybindings";
 import { describe, expect, it } from "vite-plus/test";
 import {
   projectScriptCwd,
@@ -6,6 +8,7 @@ import {
 } from "@t3tools/shared/projectScripts";
 
 import {
+  buildProjectScript,
   commandForProjectScript,
   nextProjectScriptId,
   primaryProjectScript,
@@ -13,11 +16,69 @@ import {
 } from "./projectScripts";
 
 describe("projectScripts helpers", () => {
+  it("builds scripts with preview settings", () => {
+    expect(
+      buildProjectScript("dev", {
+        name: "Dev server",
+        command: "pnpm dev",
+        icon: "debug",
+        runOnWorktreeCreate: false,
+        previewUrl: "http://localhost:5733",
+        autoOpenPreview: true,
+      }),
+    ).toEqual({
+      id: "dev",
+      name: "Dev server",
+      command: "pnpm dev",
+      icon: "debug",
+      runOnWorktreeCreate: false,
+      previewUrl: "http://localhost:5733",
+      autoOpenPreview: true,
+    });
+  });
+
+  it("omits preview settings when no preview URL is configured", () => {
+    expect(
+      buildProjectScript("test", {
+        name: "Test",
+        command: "pnpm test",
+        icon: "test",
+        runOnWorktreeCreate: false,
+        previewUrl: null,
+        autoOpenPreview: false,
+      }),
+    ).toEqual({
+      id: "test",
+      name: "Test",
+      command: "pnpm test",
+      icon: "test",
+      runOnWorktreeCreate: false,
+    });
+  });
+
   it("builds and parses script run commands", () => {
     const command = commandForProjectScript("lint");
     expect(command).toBe("script.lint.run");
-    expect(projectScriptIdFromCommand(command)).toBe("lint");
+    expect(projectScriptIdFromCommand(command ?? "")).toBe("lint");
     expect(projectScriptIdFromCommand("terminal.toggle")).toBeNull();
+  });
+
+  it.each(["install-javascript-dependencies", "A", "a.b", "a b", "-a", "", "a".repeat(25)])(
+    "omits the shortcut for legacy script ID %j without crashing script menus",
+    (id) => {
+      const commands = ["lint", id, "test"].map(commandForProjectScript);
+      expect(commands).toEqual(["script.lint.run", null, "script.test.run"]);
+      expect(commands.map((command) => shortcutLabelForCommand([], command))).toEqual([
+        null,
+        null,
+        null,
+      ]);
+    },
+  );
+
+  it("preserves the exact ID at the shortcut length limit", () => {
+    const id = "a".repeat(MAX_SCRIPT_ID_LENGTH);
+    expect(projectScriptIdFromCommand(commandForProjectScript(id) ?? "")).toBe(id);
   });
 
   it("slugifies and dedupes project script ids", () => {

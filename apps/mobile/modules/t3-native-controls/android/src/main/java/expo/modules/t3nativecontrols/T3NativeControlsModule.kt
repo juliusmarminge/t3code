@@ -7,15 +7,36 @@ class T3NativeControlsModule : Module() {
   override fun definition() = ModuleDefinition {
     Name("T3NativeControls")
 
-    View(T3HeaderButtonView::class) {
-      Prop("label") { view: T3HeaderButtonView, label: String ->
-        view.setLabel(label)
-      }
-      Prop("systemImage") { view: T3HeaderButtonView, systemImage: String ->
-        view.setSystemImage(systemImage)
-      }
+    Function("getShowcasePairingUrl") {
+      appContext.currentActivity?.intent?.getStringExtra("showcasePairingUrl")
+    }
 
-      Events("onTriggered")
+    Function("getShowcaseScene") {
+      val storedScene = appContext.reactContext
+        ?.filesDir
+        ?.resolve("t3-showcase-scene")
+        ?.takeIf { it.isFile }
+        ?.readText()
+        ?.trim()
+        ?.takeIf { it.isNotEmpty() }
+      storedScene ?: appContext.currentActivity?.intent?.getStringExtra("showcaseScene")
+    }
+
+    // The palette is fixed for the whole capture, so it only ever arrives as a
+    // launch extra — unlike the scene, which the runner rewrites in place.
+    Function("getShowcaseTheme") {
+      appContext.currentActivity?.intent?.getStringExtra("showcaseTheme")
+    }
+
+    Function("prepareShowcaseCapture") {
+      // Android app data is cleared by the host runner before launch.
+    }
+
+    Function("markShowcaseReady") { scene: String ->
+      appContext.reactContext
+        ?.filesDir
+        ?.resolve("t3-showcase-ready")
+        ?.writeText(scene)
     }
   }
 }

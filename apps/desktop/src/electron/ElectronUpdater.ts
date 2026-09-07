@@ -54,7 +54,6 @@ export const ElectronUpdaterError = Schema.Union([
   ElectronUpdaterQuitAndInstallError,
 ]);
 export type ElectronUpdaterError = typeof ElectronUpdaterError.Type;
-export const isElectronUpdaterError = Schema.is(ElectronUpdaterError);
 
 export class ElectronUpdater extends Context.Service<
   ElectronUpdater,
@@ -66,6 +65,7 @@ export class ElectronUpdater extends Context.Service<
     readonly setAllowPrerelease: (value: boolean) => Effect.Effect<void>;
     readonly allowDowngrade: Effect.Effect<boolean>;
     readonly setAllowDowngrade: (value: boolean) => Effect.Effect<void>;
+    readonly setFullChangelog: (value: boolean) => Effect.Effect<void>;
     readonly setDisableDifferentialDownload: (value: boolean) => Effect.Effect<void>;
     readonly checkForUpdates: Effect.Effect<void, ElectronUpdaterCheckForUpdatesError>;
     readonly downloadUpdate: Effect.Effect<void, ElectronUpdaterDownloadUpdateError>;
@@ -80,6 +80,7 @@ export class ElectronUpdater extends Context.Service<
   }
 >()("@t3tools/desktop/electron/ElectronUpdater") {}
 
+/** @public Service construction is part of the canonical Effect module API. */
 export const make = ElectronUpdater.of({
   setFeedURL: (options) =>
     Effect.suspend(() => {
@@ -110,6 +111,11 @@ export const make = ElectronUpdater.of({
   setAllowDowngrade: (value) =>
     Effect.suspend(() => {
       autoUpdater.allowDowngrade = value;
+      return Effect.void;
+    }),
+  setFullChangelog: (value) =>
+    Effect.suspend(() => {
+      autoUpdater.fullChangelog = value;
       return Effect.void;
     }),
   setDisableDifferentialDownload: (value) =>

@@ -1,8 +1,8 @@
 import * as Schema from "effect/Schema";
-import { TrimmedString } from "./baseSchemas.ts";
+import { ForwardCompatibleArray, TrimmedString } from "./baseSchemas.ts";
 
 export const MAX_KEYBINDING_VALUE_LENGTH = 64;
-export const MAX_KEYBINDING_WHEN_LENGTH = 256;
+const MAX_KEYBINDING_WHEN_LENGTH = 256;
 export const MAX_WHEN_EXPRESSION_DEPTH = 64;
 export const MAX_SCRIPT_ID_LENGTH = 24;
 export const MAX_KEYBINDINGS_COUNT = 256;
@@ -34,20 +34,23 @@ export const MODEL_PICKER_JUMP_KEYBINDING_COMMANDS = [
 export type ModelPickerJumpKeybindingCommand =
   (typeof MODEL_PICKER_JUMP_KEYBINDING_COMMANDS)[number];
 
-export const THREAD_KEYBINDING_COMMANDS = [
+const THREAD_KEYBINDING_COMMANDS = [
   "thread.previous",
   "thread.next",
+  "thread.copyReference",
+  "thread.settle",
+  "thread.pin",
   ...THREAD_JUMP_KEYBINDING_COMMANDS,
 ] as const;
 export type ThreadKeybindingCommand = (typeof THREAD_KEYBINDING_COMMANDS)[number];
 
-export const MODEL_PICKER_KEYBINDING_COMMANDS = [
+const MODEL_PICKER_KEYBINDING_COMMANDS = [
   "modelPicker.toggle",
   ...MODEL_PICKER_JUMP_KEYBINDING_COMMANDS,
 ] as const;
 export type ModelPickerKeybindingCommand = (typeof MODEL_PICKER_KEYBINDING_COMMANDS)[number];
 
-const STATIC_KEYBINDING_COMMANDS = [
+export const STATIC_KEYBINDING_COMMANDS = [
   "sidebar.toggle",
   "terminal.toggle",
   "terminal.split",
@@ -55,6 +58,8 @@ const STATIC_KEYBINDING_COMMANDS = [
   "terminal.new",
   "terminal.close",
   "rightPanel.toggle",
+  "rightPanel.toggleMaximized",
+  "rightPanel.close",
   "diff.toggle",
   "preview.toggle",
   "preview.refresh",
@@ -63,6 +68,10 @@ const STATIC_KEYBINDING_COMMANDS = [
   "preview.zoomOut",
   "preview.resetZoom",
   "commandPalette.toggle",
+  "filePicker.toggle",
+  "projectSearch.toggle",
+  "themeEditor.toggle",
+  "composer.stash",
   "chat.new",
   "chat.newLocal",
   "editor.openFavorite",
@@ -152,7 +161,14 @@ export const ResolvedKeybindingRule = Schema.Struct({
 }).annotate({ parseOptions: { onExcessProperty: "ignore" } });
 export type ResolvedKeybindingRule = typeof ResolvedKeybindingRule.Type;
 
-export const ResolvedKeybindingsConfig = Schema.Array(ResolvedKeybindingRule).check(
+/**
+ * The command set grows over time, so a client may receive rules it cannot
+ * represent (a command or `when` node added after that client shipped).
+ * Decoding drops those rules instead of failing the whole payload —
+ * rejecting the config would take down the connection over a shortcut the
+ * client couldn't dispatch anyway.
+ */
+export const ResolvedKeybindingsConfig = ForwardCompatibleArray(ResolvedKeybindingRule).check(
   Schema.isMaxLength(MAX_KEYBINDINGS_COUNT),
 );
 export type ResolvedKeybindingsConfig = typeof ResolvedKeybindingsConfig.Type;

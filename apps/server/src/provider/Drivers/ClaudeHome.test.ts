@@ -6,6 +6,7 @@ import * as Effect from "effect/Effect";
 import * as Path from "effect/Path";
 
 import {
+  claudeSignedOutMessage,
   makeClaudeCapabilitiesCacheKey,
   makeClaudeContinuationGroupKey,
   makeClaudeEnvironment,
@@ -31,11 +32,31 @@ it.layer(NodeServices.layer)("ClaudeHome", (it) => {
         const resolved = path.resolve(NodeOS.homedir(), ".claude-work");
 
         expect(yield* resolveClaudeHomePath({ homePath })).toBe(resolved);
-        expect((yield* makeClaudeEnvironment({ homePath })).HOME).toBe(resolved);
+        expect((yield* makeClaudeEnvironment({ homePath })).CLAUDE_CONFIG_DIR).toBe(resolved);
         expect(yield* makeClaudeContinuationGroupKey({ homePath })).toBe(`claude:home:${resolved}`);
         expect(yield* makeClaudeCapabilitiesCacheKey({ binaryPath: "claude", homePath })).toBe(
-          `claude\0${resolved}`,
+          `claude\0${resolved}\0`,
         );
+      }),
+    );
+
+    it("points the signed-out hint at the configured Claude home", () => {
+      expect(claudeSignedOutMessage({ configDir: undefined, cwd: "/synthetic" })).toContain(
+        "run `claude auth login`",
+      );
+      const configDir = "/synthetic/Claude work's $literal";
+      const message = claudeSignedOutMessage({ configDir, cwd: "/synthetic/project" });
+      expect(message).toContain(`CLAUDE_CONFIG_DIR set to "${configDir}"`);
+      expect(message).not.toContain("CLAUDE_CONFIG_DIR=");
+      expect(message).toContain("then start a new thread");
+    });
+
+    it.effect("separates capability probes by cwd", () =>
+      Effect.gen(function* () {
+        const config = { binaryPath: "claude", homePath: "" };
+        const first = yield* makeClaudeCapabilitiesCacheKey(config, "/repo-a");
+        const second = yield* makeClaudeCapabilitiesCacheKey(config, "/repo-b");
+        expect(first).not.toBe(second);
       }),
     );
 

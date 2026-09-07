@@ -10,6 +10,7 @@ const { autoUpdaterMock } = vi.hoisted(() => ({
     autoInstallOnAppQuit: true,
     channel: "latest",
     disableDifferentialDownload: false,
+    fullChangelog: false,
     checkForUpdates: vi.fn(() => Promise.resolve(null)),
     downloadUpdate: vi.fn(() => Promise.resolve([])),
     on: vi.fn(),
@@ -33,6 +34,7 @@ describe("ElectronUpdater", () => {
     autoUpdaterMock.autoInstallOnAppQuit = true;
     autoUpdaterMock.channel = "latest";
     autoUpdaterMock.disableDifferentialDownload = false;
+    autoUpdaterMock.fullChangelog = false;
     autoUpdaterMock.checkForUpdates.mockClear();
     autoUpdaterMock.checkForUpdates.mockImplementation(() => Promise.resolve(null));
     autoUpdaterMock.downloadUpdate.mockClear();
@@ -69,7 +71,6 @@ describe("ElectronUpdater", () => {
       const error = yield* updater.checkForUpdates.pipe(Effect.flip);
 
       assert.instanceOf(error, ElectronUpdater.ElectronUpdaterCheckForUpdatesError);
-      assert.isTrue(ElectronUpdater.isElectronUpdaterError(error));
       assert.equal(error.channel, "beta");
       assert.strictEqual(error.cause, cause);
       assert.equal(error.message, "Electron updater failed to check for updates on channel beta.");
@@ -87,7 +88,6 @@ describe("ElectronUpdater", () => {
       const error = yield* updater.downloadUpdate.pipe(Effect.flip);
 
       assert.instanceOf(error, ElectronUpdater.ElectronUpdaterDownloadUpdateError);
-      assert.isTrue(ElectronUpdater.isElectronUpdaterError(error));
       assert.equal(error.channel, "nightly");
       assert.strictEqual(error.cause, cause);
       assert.equal(
@@ -95,6 +95,18 @@ describe("ElectronUpdater", () => {
         "Electron updater failed to download the update on channel nightly.",
       );
       assert.notInclude(error.message, cause.message);
+    }).pipe(Effect.provide(ElectronUpdater.layer)),
+  );
+
+  it.effect("sets full changelog mode", () =>
+    Effect.gen(function* () {
+      const updater = yield* ElectronUpdater.ElectronUpdater;
+
+      yield* updater.setFullChangelog(true);
+      assert.equal(autoUpdaterMock.fullChangelog, true);
+
+      yield* updater.setFullChangelog(false);
+      assert.equal(autoUpdaterMock.fullChangelog, false);
     }).pipe(Effect.provide(ElectronUpdater.layer)),
   );
 
@@ -112,7 +124,6 @@ describe("ElectronUpdater", () => {
         .pipe(Effect.flip);
 
       assert.instanceOf(error, ElectronUpdater.ElectronUpdaterQuitAndInstallError);
-      assert.isTrue(ElectronUpdater.isElectronUpdaterError(error));
       assert.equal(error.channel, "alpha");
       assert.equal(error.isSilent, true);
       assert.equal(error.isForceRunAfter, false);
